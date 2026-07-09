@@ -70,12 +70,15 @@
   function genPars(count) { return BASE_PARS.slice(0, count); }
   function sum(arr) { return arr.reduce(function (a, b) { return a + b; }, 0); }
 
+  var DEFAULT_COURSES = ['Golfpark Holzhäusern'];
+  var CUSTOM_COURSE = '__custom__';
+
   var state = {
     screen: 'history',
     rounds: loadRounds(),
     profileName: 'Du',
+    newCourseSelect: DEFAULT_COURSES[0],
     newCourseName: '',
-    newLocation: '',
     newRoundHoles: 18,
     newRoundPlayers: [],
     active: null,
@@ -84,9 +87,17 @@
     swipe: {},
   };
 
+  function courseOptionsList() {
+    var seen = {};
+    var list = [];
+    DEFAULT_COURSES.forEach(function (c) { if (!seen[c]) { seen[c] = true; list.push(c); } });
+    state.rounds.forEach(function (r) { if (r.name && !seen[r.name]) { seen[r.name] = true; list.push(r.name); } });
+    return list;
+  }
+
   // ---------- actions ----------
   function goNewRound() {
-    state.newCourseName = ''; state.newLocation = ''; state.newRoundHoles = 18; state.newRoundPlayers = [];
+    state.newCourseSelect = DEFAULT_COURSES[0]; state.newCourseName = ''; state.newRoundHoles = 18; state.newRoundPlayers = [];
     state.screen = 'newRound';
   }
   function backToHistory() { state.screen = 'history'; state.selectedRoundId = null; }
@@ -99,9 +110,10 @@
     var pars = genPars(state.newRoundHoles);
     var scores = {};
     players.forEach(function (p) { scores[p.id] = pars.map(function (par) { return par; }); });
-    var name = (state.newCourseName || '').trim() || ('Runde ' + formatDate(new Date()));
-    var location = (state.newLocation || '').trim();
-    state.active = { name: name, location: location, date: formatDate(new Date()), holesCount: state.newRoundHoles, players: players, pars: pars, scores: scores, currentHole: 0 };
+    var name = state.newCourseSelect === CUSTOM_COURSE
+      ? ((state.newCourseName || '').trim() || ('Runde ' + formatDate(new Date())))
+      : state.newCourseSelect;
+    state.active = { name: name, location: '', date: formatDate(new Date()), holesCount: state.newRoundHoles, players: players, pars: pars, scores: scores, currentHole: 0 };
     state.screen = 'holeEntry';
   }
 
@@ -318,6 +330,10 @@
       );
     }).join('');
 
+    var courseOptionsHtml = courseOptionsList().map(function (name) {
+      return '<option value="' + esc(name) + '"' + (state.newCourseSelect === name ? ' selected' : '') + '>' + esc(name) + '</option>';
+    }).join('') + '<option value="' + CUSTOM_COURSE + '"' + (state.newCourseSelect === CUSTOM_COURSE ? ' selected' : '') + '>+ Anderer Platz…</option>';
+
     return (
       '<div style="' + screenBase + '">' +
         '<div style="display:flex;align-items:center;gap:12px;padding:4px 20px 18px;">' +
@@ -327,8 +343,10 @@
         '<div style="flex:1;overflow-y:auto;padding:0 20px 20px;display:flex;flex-direction:column;gap:22px;">' +
           '<div>' +
             '<div style="' + sectionLabelStyle + '">Golfplatz</div>' +
-            '<input data-field="courseName" value="' + esc(state.newCourseName) + '" placeholder="z.B. Golfclub Luzern" style="' + inputStyleBase + 'margin-bottom:10px;"/>' +
-            '<input data-field="location" value="' + esc(state.newLocation) + '" placeholder="Ort, z.B. Luzern" style="' + inputStyleBase + '"/>' +
+            '<select data-field="courseSelect" style="' + inputStyleBase + '">' + courseOptionsHtml + '</select>' +
+            (state.newCourseSelect === CUSTOM_COURSE
+              ? '<input data-field="courseName" value="' + esc(state.newCourseName) + '" placeholder="Name des Golfplatzes" style="' + inputStyleBase + 'margin-top:10px;"/>'
+              : '') +
           '</div>' +
           '<div>' +
             '<div style="' + sectionLabelStyle + '">Löcher</div>' +
@@ -548,11 +566,17 @@
     if (!el) return;
     var field = el.getAttribute('data-field');
     if (field === 'courseName') state.newCourseName = el.value;
-    else if (field === 'location') state.newLocation = el.value;
     else if (field === 'playerName') {
       var idx = Number(el.getAttribute('data-idx'));
       state.newRoundPlayers[idx] = el.value;
     }
+  }
+
+  function onChange(e) {
+    var el = e.target.closest('[data-field="courseSelect"]');
+    if (!el) return;
+    state.newCourseSelect = el.value;
+    render();
   }
 
   var dragCtx = null;
@@ -613,6 +637,7 @@
 
   rootEl.addEventListener('click', onClick);
   rootEl.addEventListener('input', onInput);
+  rootEl.addEventListener('change', onChange);
   rootEl.addEventListener('pointerdown', onPointerDown);
   rootEl.addEventListener('pointermove', onPointerMove);
   rootEl.addEventListener('pointerup', onPointerUp);
