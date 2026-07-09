@@ -72,6 +72,9 @@
 
   var DEFAULT_COURSES = ['Golfpark Holzhäusern'];
   var CUSTOM_COURSE = '__custom__';
+  var COURSE_SUBCOURSES = {
+    'Golfpark Holzhäusern': ['Rigi', 'Pilatus', 'Zugersee'],
+  };
 
   var state = {
     screen: 'history',
@@ -79,6 +82,7 @@
     profileName: 'Du',
     newCourseSelect: DEFAULT_COURSES[0],
     newCourseName: '',
+    newSubCourse: (COURSE_SUBCOURSES[DEFAULT_COURSES[0]] || [])[0] || '',
     newRoundHoles: 18,
     newRoundPlayers: [],
     active: null,
@@ -97,7 +101,9 @@
 
   // ---------- actions ----------
   function goNewRound() {
-    state.newCourseSelect = DEFAULT_COURSES[0]; state.newCourseName = ''; state.newRoundHoles = 18; state.newRoundPlayers = [];
+    state.newCourseSelect = DEFAULT_COURSES[0]; state.newCourseName = '';
+    state.newSubCourse = (COURSE_SUBCOURSES[DEFAULT_COURSES[0]] || [])[0] || '';
+    state.newRoundHoles = 18; state.newRoundPlayers = [];
     state.screen = 'newRound';
   }
   function backToHistory() { state.screen = 'history'; state.selectedRoundId = null; }
@@ -113,7 +119,8 @@
     var name = state.newCourseSelect === CUSTOM_COURSE
       ? ((state.newCourseName || '').trim() || ('Runde ' + formatDate(new Date())))
       : state.newCourseSelect;
-    state.active = { name: name, location: '', date: formatDate(new Date()), holesCount: state.newRoundHoles, players: players, pars: pars, scores: scores, currentHole: 0 };
+    var subCourse = COURSE_SUBCOURSES[state.newCourseSelect] ? state.newSubCourse : '';
+    state.active = { name: name, location: subCourse, date: formatDate(new Date()), holesCount: state.newRoundHoles, players: players, pars: pars, scores: scores, currentHole: 0 };
     state.screen = 'holeEntry';
   }
 
@@ -347,6 +354,13 @@
             (state.newCourseSelect === CUSTOM_COURSE
               ? '<input data-field="courseName" value="' + esc(state.newCourseName) + '" placeholder="Name des Golfplatzes" style="' + inputStyleBase + 'margin-top:10px;"/>'
               : '') +
+            (COURSE_SUBCOURSES[state.newCourseSelect]
+              ? '<select data-field="subCourseSelect" style="' + inputStyleBase + 'margin-top:10px;">' +
+                  COURSE_SUBCOURSES[state.newCourseSelect].map(function (name) {
+                    return '<option value="' + esc(name) + '"' + (state.newSubCourse === name ? ' selected' : '') + '>' + esc(name) + '</option>';
+                  }).join('') +
+                '</select>'
+              : '') +
           '</div>' +
           '<div>' +
             '<div style="' + sectionLabelStyle + '">Löcher</div>' +
@@ -573,10 +587,19 @@
   }
 
   function onChange(e) {
-    var el = e.target.closest('[data-field="courseSelect"]');
-    if (!el) return;
-    state.newCourseSelect = el.value;
-    render();
+    var courseEl = e.target.closest('[data-field="courseSelect"]');
+    if (courseEl) {
+      state.newCourseSelect = courseEl.value;
+      var subs = COURSE_SUBCOURSES[state.newCourseSelect];
+      state.newSubCourse = subs ? subs[0] : '';
+      render();
+      return;
+    }
+    var subEl = e.target.closest('[data-field="subCourseSelect"]');
+    if (subEl) {
+      state.newSubCourse = subEl.value;
+      render();
+    }
   }
 
   var dragCtx = null;
