@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#1E5631">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Golf Tracker">
+<title>Golf-Runden Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9B%B3%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231E5631'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%E2%9B%B3%3C/text%3E%3C/svg%3E">
+
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #F5F7F2; overscroll-behavior: none; }
+  #app { height: 100%; }
+  body { font-family: -apple-system, system-ui, sans-serif; color: #152016; }
+  button { font: inherit; -webkit-appearance: none; appearance: none; }
+  input { font: inherit; -webkit-appearance: none; appearance: none; }
+  input::placeholder { color: rgba(21,32,22,0.4); }
+  ::-webkit-scrollbar { display: none; }
+  * { scrollbar-width: none; }
+  @keyframes gt-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE_PARS = [4,4,3,5,4,4,3,4,5,4,4,3,5,4,4,3,4,5];
+
+  var T = {
+    bg: '#F5F7F2', card: '#FFFFFF', cardAlt: '#EDF3E8', text: '#152016',
+    muted: 'rgba(21,32,22,0.55)', border: 'rgba(21,32,22,0.1)',
+    primary: '#1E5631', onPrimary: '#FFFFFF', good: '#1E8449', bad: '#C1502E', chipBg: '#E4EEDF',
+    heroBg: 'linear-gradient(135deg, #1E5631 0%, #2C7A45 100%)',
+    heroText: '#FFFFFF', heroAccent: '#EAF7E4', heroCta: 'rgba(255,255,255,0.16)', heroCtaText: '#FFFFFF',
+  };
+
+  var STORAGE_KEY = 'golf-tracker-rounds-v1';
+
+  function loadRounds() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+  function saveRounds() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.rounds)); } catch (e) {}
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function formatDate(d) {
+    var dd = String(d.getDate()).padStart(2, '0');
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    return dd + '.' + mm + '.' + d.getFullYear();
+  }
+  function vsParLabel(diff) { return diff === 0 ? 'E' : diff > 0 ? '+' + diff : String(diff); }
+  function vsParColor(diff) { return diff < 0 ? T.good : diff > 0 ? T.bad : T.muted; }
+  function genPars(count) { return BASE_PARS.slice(0, count); }
+  function sum(arr) { return arr.reduce(function (a, b) { return a + b; }, 0); }
+
+  var state = {
+    screen: 'history',
+    rounds: loadRounds(),
+    profileName: 'Du',
+    newCourseName: '',
+    newLocation: '',
+    newRoundHoles: 18,
+    newRoundPlayers: [],
+    active: null,
+    selectedRoundId: null,
+    editingRoundId: null,
+    swipe: {},
+  };
+
+  // ---------- actions ----------
+  function goNewRound() {
+    state.newCourseName = ''; state.newLocation = ''; state.newRoundHoles = 18; state.newRoundPlayers = [];
+    state.screen = 'newRound';
+  }
+  function backToHistory() { state.screen = 'history'; state.selectedRoundId = null; }
+
+  function startRound() {
+    var players = [{ id: 'me', name: state.profileName || 'Du' }];
+    state.newRoundPlayers.forEach(function (n, i) {
+      if (n && n.trim()) players.push({ id: 'p' + i + '_' + Date.now(), name: n.trim() });
+    });
+    var pars = genPars(state.newRoundHoles);
+    var scores = {};
+    players.forEach(function (p) { scores[p.id] = pars.map(function (par) { return par; }); });
+    var name = (state.newCourseName || '').trim() || ('Runde ' + formatDate(new Date()));
+    var location = (state.newLocation || '').trim();
+    state.active = { name: name, location: location, date: formatDate(new Date()), holesCount: state.newRoundHoles, players: players, pars: pars, scores: scores, currentHole: 0 };
+    state.screen = 'holeEntry';
+  }
+
+  function exitRound() {
+    var isEditing = !!state.editingRoundId;
+    var msg = isEditing ? 'Änderungen verwerfen?' : 'Runde ohne Speichern verlassen?';
+    if (window.confirm(msg)) {
+      var id = state.editingRoundId;
+      state.active = null;
+      state.editingRoundId = null;
+      if (isEditing) { state.screen = 'detail'; state.selectedRoundId = id; }
+      else { state.screen = 'history'; }
+      render();
+    }
+  }
+
+  function editRound() {
+    var found = null;
+    for (var i = 0; i < state.rounds.length; i++) {
+      if (state.rounds[i].id === state.selectedRoundId) { found = state.rounds[i]; break; }
+    }
+    if (!found) return;
+    var scores = {};
+    Object.keys(found.scores).forEach(function (pid) { scores[pid] = found.scores[pid].slice(); });
+    state.active = {
+      name: found.name, location: found.location || '', date: found.date, holesCount: found.holesCount,
+      players: found.players.map(function (p) { return { id: p.id, name: p.name }; }),
+      pars: found.pars.slice(),
+      scores: scores,
+      currentHole: 0,
+    };
+    state.editingRoundId = found.id;
+    state.screen = 'holeEntry';
+  }
+
+  function editRoundInfo() {
+    var a = state.active; if (!a) return;
+    var newName = window.prompt('Golfplatz', a.name);
+    if (newName !== null && newName.trim()) a.name = newName.trim();
+    var newLoc = window.prompt('Ort', a.location || '');
+    if (newLoc !== null) a.location = newLoc.trim();
+  }
+
+  function incPar() { var a = state.active; a.pars[a.currentHole] = Math.min(6, a.pars[a.currentHole] + 1); }
+  function decPar() { var a = state.active; a.pars[a.currentHole] = Math.max(3, a.pars[a.currentHole] - 1); }
+  function incStroke(pid) { var a = state.active; var arr = a.scores[pid]; arr[a.currentHole] = Math.min(15, arr[a.currentHole] + 1); }
+  function decStroke(pid) { var a = state.active; var arr = a.scores[pid]; arr[a.currentHole] = Math.max(1, arr[a.currentHole] - 1); }
+
+  function prevHole() { if (state.active) state.active.currentHole = Math.max(0, state.active.currentHole - 1); }
+  function nextOrFinish() {
+    var a = state.active; if (!a) return;
+    if (a.currentHole >= a.holesCount - 1) { state.screen = 'summary'; return; }
+    a.currentHole += 1;
+  }
+  function swipeNextHole() {
+    var a = state.active; if (!a || a.currentHole >= a.holesCount - 1) return;
+    a.currentHole += 1;
+  }
+
+  function openDetail(id) { state.screen = 'detail'; state.selectedRoundId = id; }
+  function deleteRound(id) {
+    state.rounds = state.rounds.filter(function (r) { return r.id !== id; });
+    delete state.swipe[id];
+    saveRounds();
+  }
+  function saveRound() {
+    var a = state.active; if (!a) return;
+    if (state.editingRoundId) {
+      var updated = { id: state.editingRoundId, name: a.name, location: a.location, date: a.date, holesCount: a.holesCount, players: a.players, pars: a.pars, scores: a.scores };
+      var idx = -1;
+      for (var i = 0; i < state.rounds.length; i++) { if (state.rounds[i].id === state.editingRoundId) { idx = i; break; } }
+      if (idx >= 0) state.rounds[idx] = updated; else state.rounds.unshift(updated);
+      saveRounds();
+      state.active = null;
+      state.selectedRoundId = state.editingRoundId;
+      state.editingRoundId = null;
+      state.screen = 'detail';
+    } else {
+      var round = { id: 'r' + Date.now(), name: a.name, location: a.location, date: a.date, holesCount: a.holesCount, players: a.players, pars: a.pars, scores: a.scores };
+      state.rounds.unshift(round);
+      saveRounds();
+      state.active = null;
+      state.screen = 'history';
+    }
+  }
+
+  function buildResult(round) {
+    var parSum = sum(round.pars);
+    var withTotals = round.players.map(function (p) {
+      var arr = round.scores[p.id] || [];
+      return { id: p.id, name: p.name, total: sum(arr), strokes: arr };
+    });
+    var sorted = withTotals.slice().sort(function (a, b) { return a.total - b.total; });
+    var leaderboard = sorted.map(function (p, i) {
+      var diff = p.total - parSum;
+      return {
+        rank: i + 1, name: p.name, total: p.total,
+        vsParLabel: vsParLabel(diff), vsParColor: vsParColor(diff),
+        nameWeight: p.id === 'me' ? 800 : 500,
+        rowBg: i === 0 ? T.cardAlt : T.card,
+        rankBg: i === 0 ? T.primary : T.chipBg,
+        rankColor: i === 0 ? T.onPrimary : T.muted,
+      };
+    });
+    var playerRows = withTotals.map(function (p) { return { name: p.name, strokes: p.strokes }; });
+    return {
+      title: round.name,
+      subtitle: (round.location ? round.location + ' · ' : '') + round.date + ' · ' + round.holesCount + ' Löcher · Par ' + parSum,
+      holeNumbers: round.pars.map(function (_, i) { return i + 1; }),
+      pars: round.pars,
+      leaderboard: leaderboard,
+      playerRows: playerRows,
+    };
+  }
+
+  // ---------- style helpers ----------
+  var sectionLabelStyle = 'font-size:13px;font-weight:600;color:' + T.muted + ';text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;';
+  var inputStyleBase = 'width:100%;box-sizing:border-box;font-size:17px;font-family:inherit;padding:14px 16px;border-radius:14px;border:1px solid ' + T.border + ';background:' + T.card + ';color:' + T.text + ';outline:none;';
+  var circleBtnStyle = 'width:36px;height:36px;border-radius:18px;background:' + T.card + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;border:none;cursor:pointer;color:' + T.text + ';';
+  var statBoxStyle = 'flex:1;background:rgba(255,255,255,0.1);border-radius:16px;padding:12px 10px;text-align:center;';
+  var smallCircleStyle = 'width:30px;height:30px;border-radius:15px;background:' + T.cardAlt + ';display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:' + T.muted + ';border:none;cursor:pointer;';
+
+  function holesBtnStyle(active) {
+    return 'padding:14px;border-radius:14px;text-align:center;font-size:16px;font-weight:700;flex:1;border:none;cursor:pointer;font-family:inherit;' +
+      (active ? 'background:' + T.primary + ';color:' + T.onPrimary + ';' : 'background:' + T.cardAlt + ';color:' + T.text + ';');
+  }
+  function navBtnStyle(disabled) {
+    return 'width:48px;height:48px;border-radius:24px;background:' + T.cardAlt + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;border:none;cursor:pointer;' +
+      'color:' + (disabled ? T.muted : T.text) + ';opacity:' + (disabled ? 0.4 : 1) + ';';
+  }
+  function strokeBtnStyle(isInc) {
+    return isInc
+      ? 'width:38px;height:38px;border-radius:19px;background:' + T.primary + ';color:' + T.onPrimary + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;border:none;cursor:pointer;'
+      : 'width:38px;height:38px;border-radius:19px;background:' + T.cardAlt + ';color:' + T.text + ';display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;border:none;cursor:pointer;';
+  }
+
+  var screenBase = 'flex:1;display:flex;flex-direction:column;min-height:0;animation:gt-fade 0.25s ease;padding-top:calc(20px + env(safe-area-inset-top, 0px));';
+
+  // ---------- screens ----------
+  function historyScreenHtml() {
+    var totalsList = state.rounds.map(function (r) { return sum(r.scores['me'] || []); });
+    var statRounds = state.rounds.length;
+    var statBest = '–', statAvg = '–';
+    if (totalsList.length) {
+      var bestIdx = totalsList.indexOf(Math.min.apply(null, totalsList));
+      statBest = String(totalsList[bestIdx]);
+      statAvg = String(Math.round(sum(totalsList) / totalsList.length));
+    }
+    var historyList = state.rounds.map(function (r, idx) {
+      var parSum = sum(r.pars);
+      var total = sum(r.scores['me'] || []);
+      var diff = total - parSum;
+      return {
+        id: r.id, name: r.name,
+        dateLabel: (r.location ? r.location + ' · ' : '') + r.date,
+        holesCount: r.holesCount, total: total,
+        vsParLabelText: vsParLabel(diff), vsParColor: vsParColor(diff),
+        isLatest: idx === 0,
+      };
+    });
+
+    var rowsHtml = historyList.length > 0 ? historyList.map(function (r) {
+      return (
+        '<div style="position:relative;border-radius:20px;overflow:hidden;">' +
+          '<div style="position:absolute;inset:0;display:flex;justify-content:flex-end;">' +
+            '<button type="button" data-action="deleteRound" data-id="' + esc(r.id) + '" style="width:88px;background:' + T.bad + ';color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;border:none;cursor:pointer;">Löschen</button>' +
+          '</div>' +
+          '<div data-swipe-row data-id="' + esc(r.id) + '" style="position:relative;background:' + T.card + ';padding:16px 18px;display:flex;align-items:center;justify-content:space-between;gap:10px;transform:translateX(' + (state.swipe[r.id] || 0) + 'px);transition:transform 0.18s ease;touch-action:pan-y;cursor:grab;">' +
+            '<div style="min-width:0;">' +
+              (r.isLatest ? '<div style="display:inline-block;white-space:nowrap;font-size:10px;font-weight:800;letter-spacing:0.2px;text-transform:uppercase;color:' + T.primary + ';background:' + T.chipBg + ';padding:3px 9px;border-radius:100px;margin-bottom:5px;">Zuletzt gespielt</div>' : '') +
+              '<div style="font-size:17px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name) + '</div>' +
+              '<div style="font-size:13px;color:' + T.muted + ';margin-top:3px;">' + esc(r.dateLabel) + ' · ' + r.holesCount + ' Löcher</div>' +
+            '</div>' +
+            '<div style="text-align:right;flex-shrink:0;">' +
+              '<div style="font-size:22px;font-weight:800;">' + r.total + '</div>' +
+              '<div style="font-size:13px;font-weight:600;color:' + r.vsParColor + ';margin-top:2px;">' + esc(r.vsParLabelText) + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('') : '<div style="text-align:center;color:' + T.muted + ';font-size:15px;padding:60px 20px;">Noch keine Runden gespielt.<br/>Starte deine erste Runde!</div>';
+
+    return (
+      '<div style="' + screenBase + '">' +
+        '<div style="padding:0 20px 16px;">' +
+          '<div style="position:relative;overflow:hidden;border-radius:26px;padding:22px 20px 20px;background:' + T.heroBg + ';color:' + T.heroText + ';">' +
+            '<div style="position:absolute;top:-40px;right:-40px;width:140px;height:140px;border-radius:70px;background:rgba(255,255,255,0.06);"></div>' +
+            '<div style="position:absolute;bottom:-60px;right:30px;width:120px;height:120px;border-radius:60px;background:rgba(255,255,255,0.05);"></div>' +
+            '<div style="position:relative;">' +
+              '<div style="font-size:13px;opacity:0.75;font-weight:600;">Hallo, ' + esc(state.profileName) + ' 👋</div>' +
+              '<div style="font-size:26px;font-weight:800;letter-spacing:-0.4px;margin-top:2px;">Deine Golfrunden</div>' +
+            '</div>' +
+            '<div style="position:relative;display:flex;gap:10px;margin-top:18px;">' +
+              '<div style="' + statBoxStyle + '"><div style="font-size:20px;font-weight:800;color:' + T.heroAccent + ';">' + statRounds + '</div><div style="font-size:11px;opacity:0.8;margin-top:2px;font-weight:600;">Runden</div></div>' +
+              '<div style="' + statBoxStyle + '"><div style="font-size:20px;font-weight:800;color:' + T.heroAccent + ';">' + esc(statBest) + '</div><div style="font-size:11px;opacity:0.8;margin-top:2px;font-weight:600;">Bester Score</div></div>' +
+              '<div style="' + statBoxStyle + '"><div style="font-size:20px;font-weight:800;color:' + T.heroAccent + ';">' + esc(statAvg) + '</div><div style="font-size:11px;opacity:0.8;margin-top:2px;font-weight:600;">Ø Schläge</div></div>' +
+            '</div>' +
+            '<button type="button" data-action="goNewRound" style="position:relative;margin-top:16px;width:100%;background:' + T.heroCta + ';color:' + T.heroCtaText + ';text-align:center;padding:14px;border-radius:14px;font-size:15px;font-weight:700;border:none;cursor:pointer;">+ Neue Runde starten</button>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:0 20px 10px;"><div style="' + sectionLabelStyle + '">Deine Runden</div></div>' +
+        '<div style="flex:1;overflow-y:auto;padding:0 20px calc(20px + env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;gap:12px;">' + rowsHtml + '</div>' +
+      '</div>'
+    );
+  }
+
+  function newRoundScreenHtml() {
+    var playersHtml = state.newRoundPlayers.map(function (name, idx) {
+      return (
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+          '<input data-field="playerName" data-idx="' + idx + '" value="' + esc(name) + '" placeholder="Name Mitspieler" style="' + inputStyleBase + 'flex:1;padding:12px 16px;font-size:16px;"/>' +
+          '<button type="button" data-action="removePlayer" data-idx="' + idx + '" style="width:40px;height:40px;border-radius:12px;background:' + T.cardAlt + ';color:' + T.muted + ';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;border:none;cursor:pointer;">×</button>' +
+        '</div>'
+      );
+    }).join('');
+
+    return (
+      '<div style="' + screenBase + '">' +
+        '<div style="display:flex;align-items:center;gap:12px;padding:4px 20px 18px;">' +
+          '<button type="button" data-action="backToHistory" style="' + circleBtnStyle + '">‹</button>' +
+          '<div style="font-size:22px;font-weight:800;">Neue Runde</div>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:0 20px 20px;display:flex;flex-direction:column;gap:22px;">' +
+          '<div>' +
+            '<div style="' + sectionLabelStyle + '">Golfplatz</div>' +
+            '<input data-field="courseName" value="' + esc(state.newCourseName) + '" placeholder="z.B. Golfclub Luzern" style="' + inputStyleBase + 'margin-bottom:10px;"/>' +
+            '<input data-field="location" value="' + esc(state.newLocation) + '" placeholder="Ort, z.B. Luzern" style="' + inputStyleBase + '"/>' +
+          '</div>' +
+          '<div>' +
+            '<div style="' + sectionLabelStyle + '">Löcher</div>' +
+            '<div style="display:flex;gap:8px;">' +
+              '<button type="button" data-action="setHoles9" style="' + holesBtnStyle(state.newRoundHoles === 9) + '">9 Löcher</button>' +
+              '<button type="button" data-action="setHoles18" style="' + holesBtnStyle(state.newRoundHoles === 18) + '">18 Löcher</button>' +
+            '</div>' +
+          '</div>' +
+          '<div>' +
+            '<div style="' + sectionLabelStyle + '">Mitspieler</div>' +
+            '<div style="display:flex;flex-direction:column;gap:10px;">' +
+              '<div style="display:flex;align-items:center;gap:10px;background:' + T.cardAlt + ';border-radius:14px;padding:12px 16px;">' +
+                '<div style="width:30px;height:30px;border-radius:15px;background:' + T.primary + ';color:' + T.onPrimary + ';display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0;">' + esc(state.profileName.charAt(0).toUpperCase()) + '</div>' +
+                '<div style="font-size:16px;font-weight:600;flex:1;">' + esc(state.profileName) + ' (Du)</div>' +
+              '</div>' +
+              playersHtml +
+              '<button type="button" data-action="addPlayer" style="text-align:center;padding:13px;border-radius:14px;border:1.5px dashed ' + T.border + ';color:' + T.primary + ';font-size:15px;font-weight:600;background:none;cursor:pointer;">+ Mitspieler hinzufügen</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:14px 20px calc(24px + env(safe-area-inset-bottom, 0px));border-top:1px solid ' + T.border + ';">' +
+          '<button type="button" data-action="startRound" style="background:' + T.primary + ';color:' + T.onPrimary + ';text-align:center;padding:17px;border-radius:16px;font-size:18px;font-weight:700;box-shadow:0 6px 14px rgba(0,0,0,0.15);border:none;width:100%;cursor:pointer;">Runde starten</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function holeEntryScreenHtml() {
+    var a = state.active;
+    var isEditing = !!state.editingRoundId;
+    var iconBtnStyle = 'width:32px;height:32px;border-radius:16px;background:' + T.card + ';display:flex;align-items:center;justify-content:center;font-size:15px;color:' + T.muted + ';flex-shrink:0;border:none;cursor:pointer;';
+    var saveIconBtnStyle = 'width:32px;height:32px;border-radius:16px;background:' + T.primary + ';display:flex;align-items:center;justify-content:center;font-size:16px;color:' + T.onPrimary + ';flex-shrink:0;border:none;cursor:pointer;';
+    var par = a.pars[a.currentHole];
+    var parSoFar = sum(a.pars.slice(0, a.currentHole + 1));
+    var progressPct = Math.round(((a.currentHole + 1) / a.holesCount) * 100);
+    var nextButtonLabel = a.currentHole >= a.holesCount - 1 ? 'Runde beenden' : 'Nächstes Loch';
+
+    var playerRowsHtml = a.players.map(function (p) {
+      var arr = a.scores[p.id];
+      var runningTotal = sum(arr.slice(0, a.currentHole + 1));
+      var diff = runningTotal - parSoFar;
+      var avatarStyle = 'width:36px;height:36px;border-radius:18px;background:' + (p.id === 'me' ? T.primary : T.chipBg) + ';color:' + (p.id === 'me' ? T.onPrimary : T.text) + ';display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;flex-shrink:0;';
+      return (
+        '<div style="background:' + T.card + ';border-radius:18px;padding:14px 16px;display:flex;align-items:center;gap:12px;">' +
+          '<div style="' + avatarStyle + '">' + esc(p.name.charAt(0).toUpperCase()) + '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(p.name) + '</div>' +
+            '<div style="font-size:12px;color:' + T.muted + ';margin-top:2px;">Gesamt ' + runningTotal + ' &nbsp;<span style="color:' + vsParColor(diff) + ';font-weight:700;">' + esc(vsParLabel(diff)) + '</span></div>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:14px;flex-shrink:0;">' +
+            '<button type="button" data-action="decStroke" data-id="' + esc(p.id) + '" style="' + strokeBtnStyle(false) + '">−</button>' +
+            '<div style="font-size:28px;font-weight:800;min-width:34px;text-align:center;">' + arr[a.currentHole] + '</div>' +
+            '<button type="button" data-action="incStroke" data-id="' + esc(p.id) + '" style="' + strokeBtnStyle(true) + '">+</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    return (
+      '<div style="' + screenBase + '">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 20px 2px;">' +
+          '<div style="font-size:14px;font-weight:600;color:' + T.muted + ';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:' + (isEditing ? '150px' : '260px') + ';">' + esc(a.name) + '</div>' +
+          '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">' +
+            (isEditing ? '<button type="button" data-action="editRoundInfo" style="' + iconBtnStyle + '">✎</button>' : '') +
+            (isEditing ? '<button type="button" data-action="saveRound" style="' + saveIconBtnStyle + '">✓</button>' : '') +
+            '<button type="button" data-action="exitRound" style="' + iconBtnStyle + '">×</button>' +
+          '</div>' +
+        '</div>' +
+        '<div style="height:4px;background:' + T.cardAlt + ';margin:10px 20px 0;border-radius:2px;overflow:hidden;">' +
+          '<div style="height:100%;background:' + T.primary + ';width:' + progressPct + '%;border-radius:2px;"></div>' +
+        '</div>' +
+        '<div data-hole-swipe style="display:flex;align-items:center;justify-content:center;gap:22px;padding:18px 20px 4px;touch-action:pan-y;cursor:grab;">' +
+          '<button type="button" data-action="prevHole" style="' + navBtnStyle(a.currentHole === 0) + '">‹</button>' +
+          '<div data-hole-swipe-inner style="text-align:center;min-width:120px;transform:translateX(0px);">' +
+            '<div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:' + T.muted + ';">Loch ' + (a.currentHole + 1) + ' / ' + a.holesCount + '</div>' +
+            '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:6px;">' +
+              '<button type="button" data-action="decPar" style="' + smallCircleStyle + '">−</button>' +
+              '<div style="font-size:17px;font-weight:700;min-width:60px;">Par ' + par + '</div>' +
+              '<button type="button" data-action="incPar" style="' + smallCircleStyle + '">+</button>' +
+            '</div>' +
+            '<div style="font-size:11px;color:' + T.muted + ';margin-top:4px;opacity:0.7;">‹ wischen zum wechseln ›</div>' +
+          '</div>' +
+          '<button type="button" data-action="nextOrFinish" style="' + navBtnStyle(false) + '">›</button>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:14px 20px 16px;display:flex;flex-direction:column;gap:12px;">' + playerRowsHtml + '</div>' +
+        '<div style="padding:8px 20px calc(22px + env(safe-area-inset-bottom, 0px));display:flex;gap:10px;">' +
+          '<button type="button" data-action="prevHole" style="flex:1;background:' + T.cardAlt + ';color:' + T.text + ';text-align:center;padding:16px;border-radius:16px;font-size:16px;font-weight:700;opacity:' + (a.currentHole === 0 ? 0.5 : 1) + ';border:none;cursor:pointer;">Zurück</button>' +
+          '<button type="button" data-action="nextOrFinish" style="flex:2;background:' + T.primary + ';color:' + T.onPrimary + ';text-align:center;padding:16px;border-radius:16px;font-size:17px;font-weight:700;box-shadow:0 6px 14px rgba(0,0,0,0.15);border:none;cursor:pointer;">' + esc(nextButtonLabel) + '</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  function resultScreenHtml() {
+    var data = null;
+    if (state.screen === 'summary' && state.active) data = buildResult(state.active);
+    else if (state.screen === 'detail') {
+      var found = state.rounds.filter(function (x) { return x.id === state.selectedRoundId; })[0];
+      if (found) data = buildResult(found);
+    }
+    if (!data) return historyScreenHtml();
+
+    var isDetail = state.screen === 'detail';
+    var isSummary = state.screen === 'summary';
+
+    var leaderboardHtml = data.leaderboard.map(function (lb) {
+      return (
+        '<div style="background:' + lb.rowBg + ';border-radius:16px;padding:12px 16px;display:flex;align-items:center;gap:12px;">' +
+          '<div style="width:26px;height:26px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0;background:' + lb.rankBg + ';color:' + lb.rankColor + ';">' + lb.rank + '</div>' +
+          '<div style="flex:1;font-size:16px;font-weight:' + lb.nameWeight + ';">' + esc(lb.name) + '</div>' +
+          '<div style="font-size:20px;font-weight:800;">' + lb.total + '</div>' +
+          '<div style="font-size:13px;font-weight:700;color:' + lb.vsParColor + ';min-width:34px;text-align:right;">' + esc(lb.vsParLabel) + '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    var holeNumbersHtml = data.holeNumbers.map(function (hn) {
+      return '<div style="width:30px;flex-shrink:0;text-align:center;font-size:12px;color:' + T.muted + ';font-weight:600;padding:6px 0;">' + hn + '</div>';
+    }).join('');
+    var parsHtml = data.pars.map(function (pv) {
+      return '<div style="width:30px;flex-shrink:0;text-align:center;font-size:13px;color:' + T.muted + ';padding:6px 0;">' + pv + '</div>';
+    }).join('');
+    var playerRowsHtml = data.playerRows.map(function (prow) {
+      var strokesHtml = prow.strokes.map(function (sv) {
+        return '<div style="width:30px;flex-shrink:0;text-align:center;font-size:13px;font-weight:600;padding:6px 0;">' + sv + '</div>';
+      }).join('');
+      return (
+        '<div style="display:flex;gap:6px;border-top:1px solid ' + T.border + ';">' +
+          '<div style="width:64px;flex-shrink:0;font-size:13px;font-weight:700;padding:6px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prow.name) + '</div>' +
+          strokesHtml +
+        '</div>'
+      );
+    }).join('');
+
+    return (
+      '<div style="' + screenBase + '">' +
+        '<div style="padding:4px 20px 6px;display:flex;align-items:center;gap:12px;">' +
+          (isDetail ? '<button type="button" data-action="backToHistory" style="' + circleBtnStyle + '">‹</button>' : '') +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-size:24px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(data.title) + '</div>' +
+            '<div style="font-size:13px;color:' + T.muted + ';margin-top:2px;">' + esc(data.subtitle) + '</div>' +
+          '</div>' +
+          (isDetail ? '<button type="button" data-action="editRound" style="' + circleBtnStyle + '">✎</button>' : '') +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:12px 20px 20px;display:flex;flex-direction:column;gap:22px;">' +
+          '<div style="display:flex;flex-direction:column;gap:10px;">' + leaderboardHtml + '</div>' +
+          '<div>' +
+            '<div style="' + sectionLabelStyle + 'margin-bottom:10px;">Details nach Loch</div>' +
+            '<div style="overflow-x:auto;background:' + T.card + ';border-radius:16px;padding:12px;">' +
+              '<div style="display:flex;gap:6px;"><div style="width:64px;flex-shrink:0;font-size:12px;color:' + T.muted + ';font-weight:600;padding:6px 0;">Loch</div>' + holeNumbersHtml + '</div>' +
+              '<div style="display:flex;gap:6px;border-top:1px solid ' + T.border + ';"><div style="width:64px;flex-shrink:0;font-size:13px;color:' + T.muted + ';padding:6px 0;">Par</div>' + parsHtml + '</div>' +
+              playerRowsHtml +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="padding:14px 20px calc(24px + env(safe-area-inset-bottom, 0px));border-top:1px solid ' + T.border + ';">' +
+          (isDetail ? '<button type="button" data-action="backToHistory" style="background:' + T.cardAlt + ';color:' + T.text + ';text-align:center;padding:16px;border-radius:16px;font-size:17px;font-weight:700;border:none;width:100%;cursor:pointer;">Zurück zur Historie</button>' : '') +
+          (isSummary ? '<button type="button" data-action="saveRound" style="background:' + T.primary + ';color:' + T.onPrimary + ';text-align:center;padding:17px;border-radius:16px;font-size:18px;font-weight:700;box-shadow:0 6px 14px rgba(0,0,0,0.15);border:none;width:100%;cursor:pointer;">' + (state.editingRoundId ? 'Änderungen speichern' : 'Speichern') + '</button>' : '') +
+        '</div>' +
+      '</div>'
+    );
+  }
+
+  // ---------- render ----------
+  var rootEl = document.getElementById('app');
+
+  function screenHtml() {
+    if (state.screen === 'history') return historyScreenHtml();
+    if (state.screen === 'newRound') return newRoundScreenHtml();
+    if (state.screen === 'holeEntry' && state.active) return holeEntryScreenHtml();
+    if (state.screen === 'summary' || state.screen === 'detail') return resultScreenHtml();
+    return historyScreenHtml();
+  }
+
+  function render() {
+    rootEl.innerHTML =
+      '<div style="min-height:100dvh;width:100%;display:flex;flex-direction:column;background:' + T.bg + ';color:' + T.text + ';">' +
+        '<div style="width:100%;max-width:480px;margin:0 auto;flex:1;display:flex;flex-direction:column;min-height:0;">' +
+          screenHtml() +
+        '</div>' +
+      '</div>';
+  }
+
+  // ---------- event delegation ----------
+  function onClick(e) {
+    var el = e.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.getAttribute('data-action');
+    var id = el.getAttribute('data-id');
+    var idxAttr = el.getAttribute('data-idx');
+    var idx = idxAttr !== null ? Number(idxAttr) : undefined;
+
+    switch (action) {
+      case 'goNewRound': goNewRound(); render(); break;
+      case 'backToHistory': backToHistory(); render(); break;
+      case 'setHoles9': state.newRoundHoles = 9; render(); break;
+      case 'setHoles18': state.newRoundHoles = 18; render(); break;
+      case 'addPlayer': state.newRoundPlayers.push(''); render(); break;
+      case 'removePlayer': state.newRoundPlayers.splice(idx, 1); render(); break;
+      case 'startRound': startRound(); render(); break;
+      case 'exitRound': exitRound(); break; // renders internally only if confirmed
+      case 'incPar': incPar(); render(); break;
+      case 'decPar': decPar(); render(); break;
+      case 'incStroke': incStroke(id); render(); break;
+      case 'decStroke': decStroke(id); render(); break;
+      case 'prevHole': prevHole(); render(); break;
+      case 'nextOrFinish': nextOrFinish(); render(); break;
+      case 'deleteRound': deleteRound(id); render(); break;
+      case 'saveRound': saveRound(); render(); break;
+      case 'editRound': editRound(); render(); break;
+      case 'editRoundInfo': editRoundInfo(); render(); break;
+    }
+  }
+
+  function onInput(e) {
+    var el = e.target.closest('[data-field]');
+    if (!el) return;
+    var field = el.getAttribute('data-field');
+    if (field === 'courseName') state.newCourseName = el.value;
+    else if (field === 'location') state.newLocation = el.value;
+    else if (field === 'playerName') {
+      var idx = Number(el.getAttribute('data-idx'));
+      state.newRoundPlayers[idx] = el.value;
+    }
+  }
+
+  var dragCtx = null;
+
+  function onPointerDown(e) {
+    var rowEl = e.target.closest('[data-swipe-row]');
+    if (rowEl) {
+      var id = rowEl.getAttribute('data-id');
+      dragCtx = { type: 'row', id: id, el: rowEl, startX: e.clientX, startOffset: state.swipe[id] || 0, moved: false, next: null };
+      return;
+    }
+    var holeEl = e.target.closest('[data-hole-swipe]');
+    if (holeEl && state.active) {
+      var inner = holeEl.querySelector('[data-hole-swipe-inner]');
+      dragCtx = { type: 'hole', el: inner, startX: e.clientX, moved: false, dx: 0 };
+    }
+  }
+
+  function onPointerMove(e) {
+    if (!dragCtx) return;
+    var dx = e.clientX - dragCtx.startX;
+    if (Math.abs(dx) > 4) dragCtx.moved = true;
+    if (dragCtx.type === 'row') {
+      var next = Math.max(-88, Math.min(0, dragCtx.startOffset + dx));
+      dragCtx.next = next;
+      dragCtx.el.style.transition = 'none';
+      dragCtx.el.style.transform = 'translateX(' + next + 'px)';
+    } else {
+      var clamped = Math.max(-50, Math.min(50, dx));
+      dragCtx.dx = clamped;
+      dragCtx.el.style.transition = 'none';
+      dragCtx.el.style.transform = 'translateX(' + clamped + 'px)';
+    }
+  }
+
+  function onPointerUp() {
+    if (!dragCtx) return;
+    var ctx = dragCtx; dragCtx = null;
+    if (ctx.type === 'row') {
+      ctx.el.style.transition = 'transform 0.18s ease';
+      if (!ctx.moved) {
+        ctx.el.style.transform = 'translateX(' + ctx.startOffset + 'px)';
+        openDetail(ctx.id); render();
+        return;
+      }
+      var cur = ctx.next != null ? ctx.next : ctx.startOffset;
+      var snapped = cur < -44 ? -88 : 0;
+      state.swipe[ctx.id] = snapped;
+      ctx.el.style.transform = 'translateX(' + snapped + 'px)';
+    } else {
+      ctx.el.style.transition = 'transform 0.12s ease';
+      ctx.el.style.transform = 'translateX(0px)';
+      if (!ctx.moved) return;
+      if (ctx.dx > 35) { prevHole(); render(); }
+      else if (ctx.dx < -35) { swipeNextHole(); render(); }
+    }
+  }
+
+  rootEl.addEventListener('click', onClick);
+  rootEl.addEventListener('input', onInput);
+  rootEl.addEventListener('pointerdown', onPointerDown);
+  rootEl.addEventListener('pointermove', onPointerMove);
+  rootEl.addEventListener('pointerup', onPointerUp);
+  rootEl.addEventListener('pointercancel', onPointerUp);
+
+  render();
+})();
+</script>
+</body>
+</html>
