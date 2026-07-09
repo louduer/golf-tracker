@@ -72,9 +72,20 @@
 
   var DEFAULT_COURSES = ['Golfpark Holzhäusern'];
   var CUSTOM_COURSE = '__custom__';
-  var COURSE_SUBCOURSES = {
-    'Golfpark Holzhäusern': ['Rigi', 'Pilatus', 'Zugersee'],
+  // Quelle: migrosgolf.ch/de/golfparks/holzhaeusern/golfanlage (9-loch-rigi, 9-loch-pilatus, 18-loch-zugersee)
+  var COURSE_DATA = {
+    'Golfpark Holzhäusern': {
+      'Rigi': { holes: 9, pars: [4,4,4,3,4,4,4,5,4] },
+      'Pilatus': { holes: 9, pars: [3,3,3,3,3,3,3,3,3] },
+      'Zugersee': { holes: 18, pars: [4,4,5,3,4,4,4,3,4,5,3,4,4,4,3,5,5,4] },
+    },
   };
+
+  function subCourseInfo() {
+    var courseMap = COURSE_DATA[state.newCourseSelect];
+    if (!courseMap) return null;
+    return courseMap[state.newSubCourse] || null;
+  }
 
   var state = {
     screen: 'history',
@@ -82,7 +93,7 @@
     profileName: 'Du',
     newCourseSelect: DEFAULT_COURSES[0],
     newCourseName: '',
-    newSubCourse: (COURSE_SUBCOURSES[DEFAULT_COURSES[0]] || [])[0] || '',
+    newSubCourse: Object.keys(COURSE_DATA[DEFAULT_COURSES[0]] || {})[0] || '',
     newRoundHoles: 18,
     newRoundPlayers: [],
     active: null,
@@ -102,7 +113,7 @@
   // ---------- actions ----------
   function goNewRound() {
     state.newCourseSelect = DEFAULT_COURSES[0]; state.newCourseName = '';
-    state.newSubCourse = (COURSE_SUBCOURSES[DEFAULT_COURSES[0]] || [])[0] || '';
+    state.newSubCourse = Object.keys(COURSE_DATA[DEFAULT_COURSES[0]] || {})[0] || '';
     state.newRoundHoles = 18; state.newRoundPlayers = [];
     state.screen = 'newRound';
   }
@@ -113,14 +124,16 @@
     state.newRoundPlayers.forEach(function (n, i) {
       if (n && n.trim()) players.push({ id: 'p' + i + '_' + Date.now(), name: n.trim() });
     });
-    var pars = genPars(state.newRoundHoles);
+    var info = subCourseInfo();
+    var holesCount = info ? info.holes : state.newRoundHoles;
+    var pars = info ? info.pars.slice() : genPars(state.newRoundHoles);
     var scores = {};
     players.forEach(function (p) { scores[p.id] = pars.map(function (par) { return par; }); });
     var name = state.newCourseSelect === CUSTOM_COURSE
       ? ((state.newCourseName || '').trim() || ('Runde ' + formatDate(new Date())))
       : state.newCourseSelect;
-    var subCourse = COURSE_SUBCOURSES[state.newCourseSelect] ? state.newSubCourse : '';
-    state.active = { name: name, location: subCourse, date: formatDate(new Date()), holesCount: state.newRoundHoles, players: players, pars: pars, scores: scores, currentHole: 0 };
+    var subCourse = info ? state.newSubCourse : '';
+    state.active = { name: name, location: subCourse, date: formatDate(new Date()), holesCount: holesCount, players: players, pars: pars, scores: scores, currentHole: 0 };
     state.screen = 'holeEntry';
   }
 
@@ -341,6 +354,9 @@
       return '<option value="' + esc(name) + '"' + (state.newCourseSelect === name ? ' selected' : '') + '>' + esc(name) + '</option>';
     }).join('') + '<option value="' + CUSTOM_COURSE + '"' + (state.newCourseSelect === CUSTOM_COURSE ? ' selected' : '') + '>+ Anderer Platz…</option>';
 
+    var courseMap = COURSE_DATA[state.newCourseSelect];
+    var info = subCourseInfo();
+
     return (
       '<div style="' + screenBase + '">' +
         '<div style="display:flex;align-items:center;gap:12px;padding:4px 20px 18px;">' +
@@ -354,20 +370,22 @@
             (state.newCourseSelect === CUSTOM_COURSE
               ? '<input data-field="courseName" value="' + esc(state.newCourseName) + '" placeholder="Name des Golfplatzes" style="' + inputStyleBase + 'margin-top:10px;"/>'
               : '') +
-            (COURSE_SUBCOURSES[state.newCourseSelect]
+            (courseMap
               ? '<select data-field="subCourseSelect" style="' + inputStyleBase + 'margin-top:10px;">' +
-                  COURSE_SUBCOURSES[state.newCourseSelect].map(function (name) {
-                    return '<option value="' + esc(name) + '"' + (state.newSubCourse === name ? ' selected' : '') + '>' + esc(name) + '</option>';
+                  Object.keys(courseMap).map(function (name) {
+                    return '<option value="' + esc(name) + '"' + (state.newSubCourse === name ? ' selected' : '') + '>' + esc(name) + ' · ' + courseMap[name].holes + ' Löcher · Par ' + sum(courseMap[name].pars) + '</option>';
                   }).join('') +
                 '</select>'
               : '') +
           '</div>' +
           '<div>' +
             '<div style="' + sectionLabelStyle + '">Löcher</div>' +
-            '<div style="display:flex;gap:8px;">' +
-              '<button type="button" data-action="setHoles9" style="' + holesBtnStyle(state.newRoundHoles === 9) + '">9 Löcher</button>' +
-              '<button type="button" data-action="setHoles18" style="' + holesBtnStyle(state.newRoundHoles === 18) + '">18 Löcher</button>' +
-            '</div>' +
+            (info
+              ? '<div style="padding:14px;border-radius:14px;background:' + T.cardAlt + ';text-align:center;font-size:16px;font-weight:700;">' + info.holes + ' Löcher &middot; Par ' + sum(info.pars) + '</div>'
+              : '<div style="display:flex;gap:8px;">' +
+                  '<button type="button" data-action="setHoles9" style="' + holesBtnStyle(state.newRoundHoles === 9) + '">9 Löcher</button>' +
+                  '<button type="button" data-action="setHoles18" style="' + holesBtnStyle(state.newRoundHoles === 18) + '">18 Löcher</button>' +
+                '</div>') +
           '</div>' +
           '<div>' +
             '<div style="' + sectionLabelStyle + '">Mitspieler</div>' +
@@ -590,8 +608,8 @@
     var courseEl = e.target.closest('[data-field="courseSelect"]');
     if (courseEl) {
       state.newCourseSelect = courseEl.value;
-      var subs = COURSE_SUBCOURSES[state.newCourseSelect];
-      state.newSubCourse = subs ? subs[0] : '';
+      var courseMap = COURSE_DATA[state.newCourseSelect];
+      state.newSubCourse = courseMap ? Object.keys(courseMap)[0] : '';
       render();
       return;
     }
